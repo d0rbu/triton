@@ -116,18 +116,20 @@ def test_ragged_tma(dtype):
 
 
 @triton.jit
-def _fp6_desc_store(src, dst, raw, desc, FORMAT: tl.constexpr, WIDTH: tl.constexpr = 128, COL: tl.constexpr = 128):
-    codes = to_fp6(tl.load(src + tl.arange(0, WIDTH)), FORMAT)
+def _fp6_desc_store(src, dst, raw, desc, FORMAT: tl.constexpr, ROWS: tl.constexpr = 1, WIDTH: tl.constexpr = 128,
+                    COL: tl.constexpr = 128):
+    offsets = tl.arange(0, ROWS * WIDTH)
+    codes = to_fp6(tl.load(src + offsets), FORMAT)
     tl.static_assert(codes.dtype == tl.uint8)
-    tl.store(raw + tl.arange(0, WIDTH), codes)
+    tl.store(raw + offsets, codes)
     if desc is None:
         desc = tl.make_tensor_descriptor(dst, [3, 256], [192, 1], [1, 128], fp6_format=FORMAT)
-    desc.store([1, COL], codes[None, :])
+    desc.store([1, COL], codes.reshape(ROWS, WIDTH))
 
 
 @pytest.mark.parametrize("fmt", ["e2m3", "e3m2"])
-@pytest.mark.parametrize("columns", [64, 128])
-def test_fp6_tma_store_host_box64(fmt, columns, monkeypatch):
+@pytest.mark.parametrize("rows,columns", [(1, 64), (1, 128), (2, 64), (2, 128), (256, 128)])
+def test_fp6_tma_store_host_box64(fmt, rows, columns, monkeypatch):
     if not is_cuda() or torch.cuda.get_device_capability() != (10, 3):
         pytest.skip("64-value FP6 stores require SM103")
 
@@ -136,14 +138,15 @@ def test_fp6_tma_store_host_box64(fmt, columns, monkeypatch):
 
     monkeypatch.setattr(triton.runtime.driver.active.utils, "fill_tma_descriptor_tiled", unexpected_cuda_encoder)
     row_bytes = columns * 6 // 8
-    storage = torch.full((16 + 3 * row_bytes + 16, ), 0xa5, device="cuda", dtype=torch.uint8)
-    dst = storage[16:-16].view(3, row_bytes)
-    desc = TensorDescriptor.from_tensor(dst, [1, 64], fp6_format=fmt)
-    codes = torch.arange(64, device="cuda", dtype=torch.int32)
+    pitch = 48 if columns == 64 else 112
+    storage = torch.full((16 + (rows + 2) * pitch + 16, ), 0xa5, device="cuda", dtype=torch.uint8)
+    dst = storage[16:-16].view(rows + 2, pitch)[:, :row_bytes]
+    desc = TensorDescriptor.from_tensor(dst, [rows, 64], fp6_format=fmt)
+    codes = (torch.arange(rows, device="cuda")[:, None] * 7 + torch.arange(64, device="cuda")) % 64
     expected = storage.clone()
-    expected[16 + 2 * row_bytes - 48:16 + 2 * row_bytes] = pack_fp6(codes)
-    raw = torch.empty(64, device="cuda", dtype=torch.uint8)
-    kernel = _fp6_desc_store[(1, )](fp6_values(fmt, codes), dst, raw, desc, fmt, 64, columns - 64)
+    expected[16:-16].view(rows + 2, pitch)[1:-1, row_bytes - 48:row_bytes] = pack_fp6(codes)
+    raw = torch.empty_like(codes, dtype=torch.uint8)
+    kernel = _fp6_desc_store[(1, )](fp6_values(fmt, codes), dst, raw, desc, fmt, rows, 64, columns - 64)
     torch.testing.assert_close(storage, expected)
     assert kernel.metadata.global_scratch_size == 0
     assert 'padding = "b6p2x16"' in kernel.asm["ttgir"]
