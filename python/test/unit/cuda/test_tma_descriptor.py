@@ -116,13 +116,39 @@ def test_ragged_tma(dtype):
 
 
 @triton.jit
-def _fp6_desc_store(src, dst, raw, desc, FORMAT: tl.constexpr):
-    codes = to_fp6(tl.load(src + tl.arange(0, 128)), FORMAT)
+def _fp6_desc_store(src, dst, raw, desc, FORMAT: tl.constexpr, WIDTH: tl.constexpr = 128, COL: tl.constexpr = 128):
+    codes = to_fp6(tl.load(src + tl.arange(0, WIDTH)), FORMAT)
     tl.static_assert(codes.dtype == tl.uint8)
-    tl.store(raw + tl.arange(0, 128), codes)
+    tl.store(raw + tl.arange(0, WIDTH), codes)
     if desc is None:
         desc = tl.make_tensor_descriptor(dst, [3, 256], [192, 1], [1, 128], fp6_format=FORMAT)
-    desc.store([1, 128], codes[None, :])
+    desc.store([1, COL], codes[None, :])
+
+
+@pytest.mark.parametrize("fmt", ["e2m3", "e3m2"])
+@pytest.mark.parametrize("columns", [64, 128])
+def test_fp6_tma_store_host_box64(fmt, columns, monkeypatch):
+    if not is_cuda() or torch.cuda.get_device_capability() != (10, 3):
+        pytest.skip("64-value FP6 stores require SM103")
+
+    def unexpected_cuda_encoder(*args):
+        pytest.fail("narrow host descriptor used the CUDA tensor map encoder")
+
+    monkeypatch.setattr(triton.runtime.driver.active.utils, "fill_tma_descriptor_tiled", unexpected_cuda_encoder)
+    row_bytes = columns * 6 // 8
+    storage = torch.full((16 + 3 * row_bytes + 16, ), 0xa5, device="cuda", dtype=torch.uint8)
+    dst = storage[16:-16].view(3, row_bytes)
+    desc = TensorDescriptor.from_tensor(dst, [1, 64], fp6_format=fmt)
+    codes = torch.arange(64, device="cuda", dtype=torch.int32)
+    expected = storage.clone()
+    expected[16 + 2 * row_bytes - 48:16 + 2 * row_bytes] = pack_fp6(codes)
+    raw = torch.empty(64, device="cuda", dtype=torch.uint8)
+    kernel = _fp6_desc_store[(1, )](fp6_values(fmt, codes), dst, raw, desc, fmt, 64, columns - 64)
+    torch.testing.assert_close(storage, expected)
+    assert kernel.metadata.global_scratch_size == 0
+    assert 'padding = "b6p2x16"' in kernel.asm["ttgir"]
+    assert "cp.async.bulk.tensor.2d.global.shared::cta" in kernel.asm["ptx"]
+    assert "tensormap.replace" not in kernel.asm["ptx"]
 
 
 @pytest.mark.parametrize("fmt", ["e2m3", "e3m2"])
