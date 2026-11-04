@@ -55,7 +55,7 @@ def _discover_backends() -> dict[str, Backend]:
         return backends
 
     # Default path: discover via entry points for out-of-tree/downstream plugins.
-    for ep in entry_points().select(group="triton.backends"):
+    for ep in entry_points(group="triton.backends"):
         compiler = importlib.import_module(f"{ep.value}.compiler")
         driver = importlib.import_module(f"{ep.value}.driver")
         backends[ep.name] = Backend(_find_concrete_subclasses(compiler, BaseBackend),  # type: ignore
