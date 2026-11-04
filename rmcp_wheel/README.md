@@ -32,3 +32,19 @@ The initial source experiment on a Ryzen 9 9950X, Python 3.12.11, compared
 208 plugin/error controls matched exactly. This is a discovery-component
 result, not an end-to-end pre-commit, GPU kernel or training speed claim.
 Installed-package and complete RMCP gate validation are recorded separately.
+
+## Source installation
+
+The `rmcp_wheel` subdirectory also supplies a standard PEP 517 build backend.
+It downloads the exact official PyPI wheel above, then runs this same repacker.
+The resulting wheel is byte-for-byte identical to the standalone build. This
+avoids requiring a separate large binary upload and preserves all native bytes.
+It runs once during normal installation/build caching; there is no runtime
+hook, source overlay or startup validation. The subdirectory is self-contained:
+the single source edit is applied to the hash-pinned original member.
+
+Pin the immutable source archive and `subdirectory = "rmcp_wheel"` through
+[UV's URL sources](https://docs.astral.sh/uv/concepts/projects/dependencies/#url).
+Select this artifact only for Linux CPython 3.12 x86-64; other platforms retain
+the ordinary registry source. A source build needs the pinned PyPI URL reachable.
+Direct standalone rebuilds can instead use an already downloaded exact wheel.

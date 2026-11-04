@@ -38,9 +38,6 @@ def main():
     args = parser.parse_args()
     if args.upstream.stat().st_size != UPSTREAM_SIZE or digest(args.upstream) != UPSTREAM_SHA256:
         raise ValueError("upstream wheel size/SHA256 mismatch")
-    candidate = (Path(__file__).resolve().parents[1] / "python" / SOURCE).read_bytes()
-    if hashlib.sha256(candidate).hexdigest() != CANDIDATE_SHA256:
-        raise ValueError("candidate source SHA256 mismatch")
     args.output_directory.mkdir(parents=True, exist_ok=True)
     destination = args.output_directory / OUTPUT
     with zipfile.ZipFile(args.upstream) as source:
@@ -50,8 +47,16 @@ def main():
         records = {row[0]: row[1:] for row in csv.reader(io.StringIO(source.read(DIST + "RECORD").decode()))}
         if set(records) != {info.filename for info in infos if not info.is_dir()}:
             raise ValueError("upstream RECORD roster mismatch")
-        if hashlib.sha256(source.read(SOURCE)).hexdigest() != BASELINE_SHA256:
+        baseline = source.read(SOURCE)
+        if hashlib.sha256(baseline).hexdigest() != BASELINE_SHA256:
             raise ValueError("baseline source SHA256 mismatch")
+        before = b'for ep in entry_points().select(group="triton.backends"):'
+        after = b'for ep in entry_points(group="triton.backends"):'
+        if baseline.count(before) != 1:
+            raise ValueError("backend entry-point patch does not apply exactly once")
+        candidate = baseline.replace(before, after)
+        if hashlib.sha256(candidate).hexdigest() != CANDIDATE_SHA256:
+            raise ValueError("candidate source SHA256 mismatch")
         wheel = source.read(DIST + "WHEEL")
         if b"Build:" in wheel:
             raise ValueError("unexpected upstream build tag")
