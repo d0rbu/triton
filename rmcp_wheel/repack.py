@@ -1,4 +1,4 @@
-"""Repack the pinned upstream wheel with the entry-point selection change.
+"""Repack the pinned upstream wheel with entry-point selection and explicit frozen-options tuple hashes.
 
 This is an offline build tool, never imported by Triton. Native members are
 streamed unchanged; the output contains exactly the upstream member roster.
@@ -16,7 +16,7 @@ UPSTREAM_SHA256 = "74caf5e34b66d9f3a429af689c1c7128daba1d8208df60e81106b115c00d6
 UPSTREAM_SIZE = 188266850
 BASELINE_SHA256 = "c8bd4497720e736a2f8a7c01667a802d4945083a4aee77d3ac4bfe4305c47a89"
 CANDIDATE_SHA256 = "5b0b27a71c43036faa5d01a59632104d7c3d2802e04a4b4dbb943d1fb8e35445"
-BUILD = "1rmcp20261104"
+BUILD = "2rmcp20261104"
 SOURCE = "triton/backends/__init__.py"
 DIST = "triton-3.6.0.dist-info/"
 OUTPUT = f"triton-3.6.0-{BUILD}-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
@@ -61,6 +61,30 @@ def main():
         if b"Build:" in wheel:
             raise ValueError("unexpected upstream build tag")
         replacements = {SOURCE: candidate, DIST + "WHEEL": wheel.rstrip(b"\n") + f"\nBuild: {BUILD}\n".encode()}
+        # Build-time-only source payloads; no runtime patching or native changes.
+        compiler_sources = [
+            (
+                "amd",
+                "62556f905349ceed6286f9926f72ced9c5e990807e0791873945e93ca8e287d2",
+                "1ceb3c66092c68022143e90eb6a8d20461faea9195671168c3ff222adb61d217",
+            ),
+            (
+                "nvidia",
+                "eea55698bab00c726b3d1d495b390b72a63aaa8d167781a65ea5212d394d76f6",
+                "56be3e29375810b6d2e1ccd8d997ca5a2f91716cd27a94e993396c7ca6a7b80a",
+            ),
+        ]
+        for backend, baseline_sha, candidate_sha in compiler_sources:
+            member = f"triton/backends/{backend}/compiler.py"
+            original = source.read(member)
+            replacement = (
+                Path(__file__).resolve().parent.parent / "third_party" / backend / "backend/compiler.py"
+            ).read_bytes()
+            if hashlib.sha256(original).hexdigest() != baseline_sha:
+                raise ValueError(f"baseline compiler source mismatch: {member}")
+            if hashlib.sha256(replacement).hexdigest() != candidate_sha:
+                raise ValueError(f"candidate compiler source mismatch: {member}")
+            replacements[member] = replacement
         rows = []
         with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as target:
             for old in infos:

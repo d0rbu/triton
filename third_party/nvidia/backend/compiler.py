@@ -130,6 +130,33 @@ class CUDAOptions:
     arch: str = None
     instrumentation_mode: str = ""
 
+    def __hash__(self):
+        return hash((
+            self.num_warps,
+            self.num_ctas,
+            self.num_stages,
+            self.warp_size,
+            self.maxnreg,
+            self.ptx_version,
+            self.ptx_options,
+            self.ir_override,
+            self.enable_fp_fusion,
+            self.enable_reflect_ftz,
+            self.launch_cooperative_grid,
+            self.launch_pdl,
+            self.supported_fp8_dtypes,
+            self.deprecated_fp8_dot_operand_dtypes,
+            self.default_dot_input_precision,
+            self.allowed_dot_input_precisions,
+            self.max_num_imprecise_acc_default,
+            self.extern_libs,
+            self.debug,
+            self.backend_name,
+            self.sanitize_overflow,
+            self.arch,
+            self.instrumentation_mode,
+        ))
+
     def __post_init__(self):
         default_libdir = Path(__file__).parent / 'lib'
         extern_libs = {} if self.extern_libs is None else dict(self.extern_libs)

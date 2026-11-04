@@ -75,6 +75,31 @@ class HIPOptions:
     # schedule_hint="attention,memory-bound-attention"
     schedule_hint: str = 'none'
 
+    def __hash__(self):
+        return hash((
+            self.num_warps,
+            self.waves_per_eu,
+            self.num_stages,
+            self.num_ctas,
+            self.extern_libs,
+            self.debug,
+            self.sanitize_overflow,
+            self.arch,
+            self.supported_fp8_dtypes,
+            self.deprecated_fp8_dot_operand_dtypes,
+            self.default_dot_input_precision,
+            self.allowed_dot_input_precisions,
+            self.enable_fp_fusion,
+            self.launch_cooperative_grid,
+            self.matrix_instr_nonkdim,
+            self.kpack,
+            self.allow_flush_denorm,
+            self.max_num_imprecise_acc_default,
+            self.backend_name,
+            self.instrumentation_mode,
+            self.schedule_hint,
+        ))
+
     def __post_init__(self):
         gfx_major = int(self.arch[3:-2])  # Drop "gfx" prefix and minor/patch number
         warp_size = 32 if gfx_major >= 10 else 64
